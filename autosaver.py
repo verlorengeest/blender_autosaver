@@ -1,7 +1,7 @@
 bl_info = {
     "name": "AutoSaver",
     "author": "Kaan Soyler",
-    "version": (1, 0, 0),  
+    "version": (1, 1, 0),  
     "blender": (4, 2, 0),  
     "location": "View3D > Sidebar > AutoSaver",
     "description": "Automatically saves the Blender file at set intervals",
@@ -12,7 +12,9 @@ bl_info = {
 
 import bpy
 import time
-from bpy.props import IntProperty, BoolProperty
+import os
+import uuid
+from bpy.props import IntProperty, BoolProperty, StringProperty
 
 class AutoSaverOperator(bpy.types.Operator):
     """Operator that autosaves the file at set intervals"""
@@ -32,12 +34,39 @@ class AutoSaverOperator(bpy.types.Operator):
             interval = context.scene.auto_saver_interval
 
             if current_time - self._last_save_time >= interval:
+                directory = context.scene.auto_saver_directory
+                unique_names = context.scene.auto_saver_unique_names
+
                 if bpy.data.is_saved:
-                    bpy.ops.wm.save_mainfile()
+                    if unique_names:
+                        # Save as a new file each time
+                        file_path = bpy.data.filepath
+                        dir_name = os.path.dirname(file_path)
+                        base_name = os.path.basename(file_path)
+                        name, ext = os.path.splitext(base_name)
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        new_name = f"{name}_{timestamp}{ext}"
+                        new_path = os.path.join(dir_name, new_name)
+                        bpy.ops.wm.save_as_mainfile(filepath=new_path, copy=True)
+                    else:
+                        # Overwrite the current file
+                        bpy.ops.wm.save_mainfile()
                     self._last_save_time = current_time
                     self.report({'INFO'}, "File autosaved.")
                 else:
-                    self.report({'WARNING'}, "File has not been saved yet. Please save the file first.")
+                    # File has not been saved yet
+                    if directory:
+                        if not os.path.exists(directory):
+                            os.makedirs(directory)
+                        random_name = f"autosave_{uuid.uuid4().hex[:8]}.blend"
+                        save_path = os.path.join(directory, random_name)
+                        bpy.ops.wm.save_as_mainfile(filepath=save_path, copy=False)
+                        self._last_save_time = current_time
+                        self.report({'INFO'}, f"File autosaved as {random_name}.")
+                    else:
+                        self.report({'WARNING'}, "Autosave directory not set. Please set it in the AutoSaver panel.")
+            return {'PASS_THROUGH'}
+
         return {'PASS_THROUGH'}
 
     def execute(self, context):
@@ -82,6 +111,8 @@ class AutoSaverPanel(bpy.types.Panel):
         scene = context.scene
 
         layout.prop(scene, "auto_saver_interval")
+        layout.prop(scene, "auto_saver_directory")
+        layout.prop(scene, "auto_saver_unique_names")
         row = layout.row()
         if not scene.auto_saver_running:
             row.operator("wm.auto_saver_operator", text="Start AutoSaver")
@@ -103,6 +134,17 @@ def register():
         description="Indicates if AutoSaver is running",
         default=False,
     )
+    bpy.types.Scene.auto_saver_directory = StringProperty(
+        name="Autosave Directory",
+        description="Directory where to save autosaves if the file hasn't been saved yet",
+        subtype='DIR_PATH',
+        default=""
+    )
+    bpy.types.Scene.auto_saver_unique_names = BoolProperty(
+        name="Save as Different Files",
+        description="Save as different files each time",
+        default=False
+    )
 
 def unregister():
     bpy.utils.unregister_class(AutoSaverOperator)
@@ -110,6 +152,8 @@ def unregister():
     bpy.utils.unregister_class(AutoSaverPanel)
     del bpy.types.Scene.auto_saver_interval
     del bpy.types.Scene.auto_saver_running
+    del bpy.types.Scene.auto_saver_directory
+    del bpy.types.Scene.auto_saver_unique_names
 
 if __name__ == "__main__":
     register()
